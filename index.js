@@ -114,7 +114,15 @@ app.post("/tables/:table_id/rows", async (req, res, next) => {
 app.get("/tables/:table_id/rows", async (req, res, next) => {
   try {
     const { table_id } = req.params;
-    const filters = req.query.filter || {};
+
+    // Parse filter query parameters: ?filter[colName]=value becomes {colName: value}
+    const filters = {};
+    for (const key of Object.keys(req.query)) {
+      if (key.startsWith("filter[") && key.endsWith("]")) {
+        const colName = key.slice(7, -1); // extract "colName" from "filter[colName]"
+        filters[colName] = req.query[key];
+      }
+    }
 
     const rows = await getRows(table_id, filters);
     res.json(rows);
