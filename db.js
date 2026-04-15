@@ -184,11 +184,12 @@ async function insertRow(tableId, data) {
 /**
  * Get rows from a table with optional filtering.
  * Filters is an object: {colName: value, ...}
- * All filter values must match the column type (validated in JavaScript).
+ * Filter column names are validated against schema (whitelist).
+ * Returned JSONB data is validated against schema before returning to client.
  * Returns array of {id, ...data, created_at}.
  */
 async function getRows(tableId, filters = {}) {
-  // Load schema to validate filter keys and types
+  // Load schema to validate filter keys and validate returned data
   const schema = await getTableSchema(tableId);
   if (schema === null) {
     throw Object.assign(new Error(`Table not found`), { status: 404 });
@@ -196,50 +197,22 @@ async function getRows(tableId, filters = {}) {
 
   const schemaMap = new Map(schema.map(col => [col.name, col]));
 
-  // Validate filters in JavaScript
-  const validatedFilters = {};
-  for (const [colName, value] of Object.entries(filters)) {
-    const col = schemaMap.get(colName);
-    if (!col) {
+  // Validate filter column names (whitelist check only, not types)
+  for (const colName of Object.keys(filters)) {
+    if (!schemaMap.has(colName)) {
       throw Object.assign(new Error(`Unknown column: ${colName}`), { status: 400 });
     }
-
-    // Type validation
-    if (col.type === "string") {
-      if (typeof value !== "string") {
-        throw Object.assign(
-          new Error(`Filter "${colName}" must be a string, got ${typeof value}`),
-          { status: 400 }
-        );
-      }
-    } else if (col.type === "number") {
-      if (typeof value !== "number") {
-        throw Object.assign(
-          new Error(`Filter "${colName}" must be a number, got ${typeof value}`),
-          { status: 400 }
-        );
-      }
-    } else if (col.type === "boolean") {
-      if (typeof value !== "boolean") {
-        throw Object.assign(
-          new Error(`Filter "${colName}" must be a boolean, got ${typeof value}`),
-          { status: 400 }
-        );
-      }
-    }
-
-    validatedFilters[colName] = value;
   }
 
-  // Build WHERE clause with validated, safe filters
+  // Build WHERE clause with whitelisted filters
   let whereClause = "WHERE table_id = $1";
   const params = [tableId];
   let paramIdx = 2;
 
-  for (const [colName, value] of Object.entries(validatedFilters)) {
+  for (const [colName, value] of Object.entries(filters)) {
     const col = schemaMap.get(colName);
 
-    // All values now validated; use simple equality with proper JSONB casting
+    // Build type-specific WHERE clause for filter
     if (col.type === "string") {
       whereClause += ` AND data->>'${colName}' = $${paramIdx}`;
     } else if (col.type === "number") {
@@ -257,11 +230,36 @@ async function getRows(tableId, filters = {}) {
     params
   );
 
-  return result.rows.map(row => ({
-    id: row.id,
-    ...row.data,
-    created_at: row.created_at,
-  }));
+  // Validate returned JSONB data against schema before returning to client
+  return result.rows.map(row => {
+    const validatedData = {};
+
+    // Validate each field in the JSONB data matches schema
+    for (const [key, value] of Object.entries(row.data)) {
+      const col = schemaMap.get(key);
+      if (!col) {
+        throw Object.assign(
+          new Error(`Data contains unexpected column: ${key}`),
+          { status: 500 }
+        );
+      }
+
+      if (typeof value !== col.type) {
+        throw Object.assign(
+          new Error(`Column "${key}" has wrong type: expected ${col.type}, got ${typeof value}`),
+          { status: 500 }
+        );
+      }
+
+      validatedData[key] = value;
+    }
+
+    return {
+      id: row.id,
+      ...validatedData,
+      created_at: row.created_at,
+    };
+  });
 }
 
 /**
