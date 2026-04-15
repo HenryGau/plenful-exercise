@@ -221,6 +221,14 @@ app.patch("/tables/:table_id/schema", async (req, res, next) => {
       }
     }
 
+    // Validate total column count won't exceed 500
+    const removeCount = remove ? remove.length : 0;
+    const addCount = add ? add.length : 0;
+    const newColumnCount = schema.length - removeCount + addCount;
+    if (newColumnCount > 500) {
+      return res.status(400).json({ error: `Max 500 columns per table (would have ${newColumnCount})` });
+    }
+
     const columns = await patchSchema(table_id, { add, remove, rename });
     res.json({ id: table_id, columns });
   } catch (err) {

@@ -429,6 +429,64 @@ describe("PATCH /tables/:table_id/schema — Modify schema", () => {
 
     assert.equal(res.status, 404);
   });
+
+  it("rejects adding columns that would exceed 500 total", async () => {
+    // Create a table with 499 columns
+    const bigCols = Array.from({ length: 499 }, (_, i) => ({
+      name: `col${i}`,
+      type: "string",
+    }));
+    const bigTableRes = await request(app)
+      .post("/tables")
+      .send({
+        name: "big_table",
+        columns: bigCols,
+      });
+    const bigTableId = bigTableRes.body.id;
+
+    // Try to add 2 more columns (would be 501 total)
+    const res = await request(app)
+      .patch(`/tables/${bigTableId}/schema`)
+      .send({
+        add: [
+          { name: "new1", type: "string" },
+          { name: "new2", type: "string" },
+        ],
+      });
+
+    assert.equal(res.status, 400);
+    assert(res.body.error.includes("500"));
+  });
+
+  it("rejects remove + add that would exceed 500 total", async () => {
+    // Create a table with 499 columns
+    const bigCols = Array.from({ length: 499 }, (_, i) => ({
+      name: `col${i}`,
+      type: "string",
+    }));
+    const bigTableRes = await request(app)
+      .post("/tables")
+      .send({
+        name: "big_table2",
+        columns: bigCols,
+      });
+    const bigTableId = bigTableRes.body.id;
+
+    // Try to remove 1 and add 3 (would be 501 total)
+    const res = await request(app)
+      .patch(`/tables/${bigTableId}/schema`)
+      .send({
+        remove: ["col0"],
+        add: [
+          { name: "new1", type: "string" },
+          { name: "new2", type: "string" },
+          { name: "new3", type: "string" },
+        ],
+      });
+
+    assert.equal(res.status, 400);
+    assert(res.body.error.includes("500"));
+  });
 });
 
 describe("PUT /tables/:table_id/rows/:row_id — Update row", () => {
