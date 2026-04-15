@@ -5,6 +5,10 @@ const {
   createTableRecord,
   insertRow,
   getRows,
+  updateRow,
+  deleteRow,
+  deleteTable,
+  patchSchema,
 } = require("./db");
 
 const app = express();
@@ -114,6 +118,140 @@ app.get("/tables/:table_id/rows", async (req, res, next) => {
 
     const rows = await getRows(table_id, filters);
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch("/tables/:table_id/schema", async (req, res, next) => {
+  try {
+    const { table_id } = req.params;
+    const { add, remove, rename } = req.body;
+
+    // Validate add columns
+    if (add) {
+      if (!Array.isArray(add)) {
+        return res.status(400).json({ error: "add must be an array" });
+      }
+      for (const col of add) {
+        if (!col.name || typeof col.name !== "string" || col.name.length === 0) {
+          return res.status(400).json({ error: "Column name must be a non-empty string" });
+        }
+        if (col.name.length > 255) {
+          return res.status(400).json({ error: `Column name too long: ${col.name}` });
+        }
+        if (!["string", "number", "boolean"].includes(col.type)) {
+          return res.status(400).json({ error: `Invalid column type: ${col.type}` });
+        }
+      }
+    }
+
+    // Validate remove columns
+    if (remove) {
+      if (!Array.isArray(remove)) {
+        return res.status(400).json({ error: "remove must be an array" });
+      }
+      for (const colName of remove) {
+        if (typeof colName !== "string" || colName.length === 0) {
+          return res.status(400).json({ error: "Column name must be a non-empty string" });
+        }
+      }
+    }
+
+    // Validate rename columns
+    if (rename) {
+      if (!Array.isArray(rename)) {
+        return res.status(400).json({ error: "rename must be an array" });
+      }
+      for (const { oldName, newName } of rename) {
+        if (!oldName || typeof oldName !== "string" || oldName.length === 0) {
+          return res.status(400).json({ error: "oldName must be a non-empty string" });
+        }
+        if (!newName || typeof newName !== "string" || newName.length === 0) {
+          return res.status(400).json({ error: "newName must be a non-empty string" });
+        }
+        if (newName.length > 255) {
+          return res.status(400).json({ error: `Column name too long: ${newName}` });
+        }
+      }
+    }
+
+    const columns = await patchSchema(table_id, { add, remove, rename });
+    res.json({ id: table_id, columns });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put("/tables/:table_id/rows/:row_id", async (req, res, next) => {
+  try {
+    const { table_id, row_id } = req.params;
+    const values = req.body;
+
+    // Load schema to validate row data
+    const schema = await getTableSchema(table_id);
+    if (!schema) {
+      return res.status(404).json({ error: "Table not found" });
+    }
+
+    // Validate all required fields exist and have correct types
+    for (const col of schema) {
+      if (!(col.name in values)) {
+        return res.status(400).json({ error: `Missing field: ${col.name}` });
+      }
+
+      const value = values[col.name];
+      if (typeof value !== col.type) {
+        return res.status(400).json({
+          error: `Field "${col.name}" must be ${col.type}, got ${typeof value}`,
+        });
+      }
+    }
+
+    // Check for unexpected fields
+    const schemaKeys = new Set(schema.map(col => col.name));
+    for (const key of Object.keys(values)) {
+      if (!schemaKeys.has(key)) {
+        return res.status(400).json({ error: `Unexpected field: ${key}` });
+      }
+    }
+
+    const row = await updateRow(table_id, row_id, values);
+    if (!row) {
+      return res.status(404).json({ error: "Row not found" });
+    }
+
+    res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete("/tables/:table_id/rows/:row_id", async (req, res, next) => {
+  try {
+    const { table_id, row_id } = req.params;
+
+    const deleted = await deleteRow(table_id, row_id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Row not found" });
+    }
+
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete("/tables/:table_id", async (req, res, next) => {
+  try {
+    const { table_id } = req.params;
+
+    const deleted = await deleteTable(table_id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Table not found" });
+    }
+
+    res.status(204).send();
   } catch (err) {
     next(err);
   }
