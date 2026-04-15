@@ -184,6 +184,43 @@ app.patch("/tables/:table_id/schema", async (req, res, next) => {
       }
     }
 
+    // Load current schema to validate remove/rename operations
+    const schema = await getTableSchema(table_id);
+    if (!schema) {
+      return res.status(404).json({ error: "Table not found" });
+    }
+    const schemaMap = new Map(schema.map(col => [col.name, col]));
+
+    // Validate remove columns exist
+    if (remove) {
+      for (const colName of remove) {
+        if (!schemaMap.has(colName)) {
+          return res.status(400).json({ error: `Column does not exist: ${colName}` });
+        }
+      }
+    }
+
+    // Validate rename columns exist
+    if (rename) {
+      for (const { oldName, newName } of rename) {
+        if (!schemaMap.has(oldName)) {
+          return res.status(400).json({ error: `Column does not exist: ${oldName}` });
+        }
+        if (schemaMap.has(newName)) {
+          return res.status(400).json({ error: `Column already exists: ${newName}` });
+        }
+      }
+    }
+
+    // Validate add columns don't already exist
+    if (add) {
+      for (const col of add) {
+        if (schemaMap.has(col.name)) {
+          return res.status(400).json({ error: `Column already exists: ${col.name}` });
+        }
+      }
+    }
+
     const columns = await patchSchema(table_id, { add, remove, rename });
     res.json({ id: table_id, columns });
   } catch (err) {

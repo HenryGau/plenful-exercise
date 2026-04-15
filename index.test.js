@@ -375,6 +375,50 @@ describe("PATCH /tables/:table_id/schema — Modify schema", () => {
     assert.equal(res.status, 400);
   });
 
+  it("rejects adding a column that already exists", async () => {
+    const res = await request(app)
+      .patch(`/tables/${tableId}/schema`)
+      .send({
+        add: [{ name: "name", type: "string" }],
+      });
+
+    assert.equal(res.status, 400);
+    assert(res.body.error.includes("already exists"));
+  });
+
+  it("rejects removing a non-existent column", async () => {
+    const res = await request(app)
+      .patch(`/tables/${tableId}/schema`)
+      .send({
+        remove: ["nonexistent"],
+      });
+
+    assert.equal(res.status, 400);
+    assert(res.body.error.includes("does not exist"));
+  });
+
+  it("rejects renaming a non-existent column", async () => {
+    const res = await request(app)
+      .patch(`/tables/${tableId}/schema`)
+      .send({
+        rename: [{ oldName: "nonexistent", newName: "renamed" }],
+      });
+
+    assert.equal(res.status, 400);
+    assert(res.body.error.includes("does not exist"));
+  });
+
+  it("rejects renaming to a column that already exists", async () => {
+    const res = await request(app)
+      .patch(`/tables/${tableId}/schema`)
+      .send({
+        rename: [{ oldName: "name", newName: "email" }],
+      });
+
+    assert.equal(res.status, 400);
+    assert(res.body.error.includes("already exists"));
+  });
+
   it("rejects non-existent table", async () => {
     const fakeTableId = "00000000-0000-0000-0000-000000000000";
     const res = await request(app)
