@@ -184,10 +184,11 @@ async function insertRow(tableId, data) {
 /**
  * Get rows from a table with optional filtering.
  * Filters is an object: {colName: value, ...}
+ * All filter values must match the column type (validated in JavaScript).
  * Returns array of {id, ...data, created_at}.
  */
 async function getRows(tableId, filters = {}) {
-  // Load schema to validate and get column types
+  // Load schema to validate filter keys and types
   const schema = await getTableSchema(tableId);
   if (schema === null) {
     throw Object.assign(new Error(`Table not found`), { status: 404 });
@@ -195,18 +196,50 @@ async function getRows(tableId, filters = {}) {
 
   const schemaMap = new Map(schema.map(col => [col.name, col]));
 
-  // Build WHERE clause with validated filters
-  let whereClause = "WHERE table_id = $1";
-  const params = [tableId];
-  let paramIdx = 2;
-
+  // Validate filters in JavaScript
+  const validatedFilters = {};
   for (const [colName, value] of Object.entries(filters)) {
     const col = schemaMap.get(colName);
     if (!col) {
       throw Object.assign(new Error(`Unknown column: ${colName}`), { status: 400 });
     }
 
-    // Build type-specific WHERE clause
+    // Type validation
+    if (col.type === "string") {
+      if (typeof value !== "string") {
+        throw Object.assign(
+          new Error(`Filter "${colName}" must be a string, got ${typeof value}`),
+          { status: 400 }
+        );
+      }
+    } else if (col.type === "number") {
+      if (typeof value !== "number") {
+        throw Object.assign(
+          new Error(`Filter "${colName}" must be a number, got ${typeof value}`),
+          { status: 400 }
+        );
+      }
+    } else if (col.type === "boolean") {
+      if (typeof value !== "boolean") {
+        throw Object.assign(
+          new Error(`Filter "${colName}" must be a boolean, got ${typeof value}`),
+          { status: 400 }
+        );
+      }
+    }
+
+    validatedFilters[colName] = value;
+  }
+
+  // Build WHERE clause with validated, safe filters
+  let whereClause = "WHERE table_id = $1";
+  const params = [tableId];
+  let paramIdx = 2;
+
+  for (const [colName, value] of Object.entries(validatedFilters)) {
+    const col = schemaMap.get(colName);
+
+    // All values now validated; use simple equality with proper JSONB casting
     if (col.type === "string") {
       whereClause += ` AND data->>'${colName}' = $${paramIdx}`;
     } else if (col.type === "number") {
