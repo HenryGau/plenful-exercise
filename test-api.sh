@@ -4,6 +4,22 @@
 set -e
 BASE_URL="http://localhost:3000"
 
+# Track tables created during this test for cleanup
+TABLES_CREATED=()
+
+# Cleanup function: Delete all tables created during this test run
+cleanup() {
+  echo ""
+  echo "Cleaning up test data..."
+  for TABLE_ID in "${TABLES_CREATED[@]}"; do
+    curl -s -X DELETE "$BASE_URL/tables/$TABLE_ID" > /dev/null 2>&1 || true
+  done
+  echo "Cleanup complete."
+}
+
+# Run cleanup on exit (success or failure)
+trap cleanup EXIT
+
 echo "=== Tables API Manual Testing ==="
 echo "Testing against: $BASE_URL"
 echo ""
@@ -15,6 +31,7 @@ TABLE_RESPONSE=$(curl -s -X POST "$BASE_URL/tables" \
   -H "Content-Type: application/json" \
   -d '{"name":"customers","columns":[{"name":"name","type":"string"},{"name":"email","type":"string"},{"name":"age","type":"number"},{"name":"active","type":"boolean"}]}')
 TABLE_ID=$(echo "$TABLE_RESPONSE" | jq -r '.id')
+TABLES_CREATED+=("$TABLE_ID")
 echo "Created table ID: $TABLE_ID"
 echo ""
 
@@ -92,6 +109,8 @@ echo "Deleting the table..."
 curl -s -w "Status: %{http_code}\n" -X DELETE "$BASE_URL/tables/$TABLE_ID"
 echo "Verifying deletion (should return 404)..."
 curl -s -w "Status: %{http_code}\n" -X GET "$BASE_URL/tables/$TABLE_ID/rows" | tail -1
+# Remove from tracking array since we explicitly deleted it
+TABLES_CREATED=("${TABLES_CREATED[@]/$TABLE_ID}")
 echo ""
 
 # 10. VALIDATION TESTS
@@ -103,6 +122,7 @@ curl -s -X POST "$BASE_URL/tables" -H "Content-Type: application/json" -d '{"nam
 echo "Test missing required field (should be 400):"
 NEW_TABLE=$(curl -s -X POST "$BASE_URL/tables" -H "Content-Type: application/json" -d '{"name":"test","columns":[{"name":"field","type":"string"}]}')
 NEW_TABLE_ID=$(echo "$NEW_TABLE" | jq -r '.id')
+TABLES_CREATED+=("$NEW_TABLE_ID")
 curl -s -X POST "$BASE_URL/tables/$NEW_TABLE_ID/rows" -H "Content-Type: application/json" -d '{}' | jq '.error'
 
 echo "Test wrong type (should be 400):"
@@ -110,8 +130,6 @@ curl -s -X POST "$BASE_URL/tables/$NEW_TABLE_ID/rows" -H "Content-Type: applicat
 
 echo "Test unknown filter column (should be 400):"
 curl -s -X GET "$BASE_URL/tables/$NEW_TABLE_ID/rows?filter[unknown]=value" | jq '.error'
-
-curl -s -X DELETE "$BASE_URL/tables/$NEW_TABLE_ID" > /dev/null
 
 echo ""
 echo "=== Manual Testing Complete ==="
