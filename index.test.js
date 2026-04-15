@@ -6,6 +6,16 @@ const { pool, initDatabase } = require("./db");
 
 // Global setup/teardown: initialize database before all tests, close pool after
 before(async () => {
+  const client = await pool.connect();
+  try {
+    // Clean up any leftover data from previous test runs
+    await client.query("DELETE FROM rows");
+    await client.query("DELETE FROM columns");
+    await client.query("DELETE FROM tables");
+  } finally {
+    client.release();
+  }
+
   await initDatabase();
 });
 
