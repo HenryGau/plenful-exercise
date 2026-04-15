@@ -362,9 +362,6 @@ describe("PATCH /tables/:table_id/schema — Modify schema", () => {
     assert(!res.body.columns.some(c => c.name === "age"));
   });
 
-  // TODO: rename column test - requires fixing JSONB rename in db.js patchSchema
-  // it("renames a column", async () => { ... });
-
   it("rejects invalid column type in add", async () => {
     const res = await request(app)
       .patch(`/tables/${tableId}/schema`)
